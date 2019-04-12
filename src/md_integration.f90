@@ -323,6 +323,7 @@ contains
       w = Enew-Eold + pV - S
 
       if ( h3o_index /= hydronium_molecule_index(1) ) then
+          print *, "volume move coincident with proton transfer"
           w = -1 ! force the volume move to accept so that proton jumps don't
                  ! break the code
       end if
@@ -360,6 +361,8 @@ contains
       if (accepted) then
           n_accept = n_accept + 1
           verlet_list_data%flag_verlet_list = 1
+
+          print*, "step", trajectory_step, "volume", system_data%volume, "density", system_data%n_mole / system_data%volume
       endif
 
 
@@ -453,9 +456,21 @@ contains
     type(PME_data_type)     , intent(inout)     :: PME_data
     type(file_io_data_type) , intent(in)        :: file_io_data
 
-    integer :: i_atom, i_type, total_atoms, h3o_ind, i
+    integer :: i_atom, i_type, total_atoms, h3o_index, i, j
     real*8  :: dt , conv_fac
     integer, dimension(4) :: atom_num
+
+    integer, parameter :: max_neighbors = 10000
+    integer :: n_neighbors
+    type(atom_data_type), save :: h3o_neighborhood
+    ! check if one of the arrays in the data structure has been allocated
+    ! if not, then this is probably the first iteration of this function
+    if (.not. allocated(h3o_neighborhood%xyz)) call allocate_atom_data(h3o_neighborhood, max_neighbors + 4)
+
+    ! save the neighborhood around the hydronium in case a proton transfer
+    ! occurs
+    call save_hydronium_neighborhood( system_data , molecule_data , atom_data, verlet_list_data, file_io_data, h3o_neighborhood, n_neighbors )
+
 
     !****************************timing**************************************!
     if(debug .eq. 1) then
@@ -464,54 +479,13 @@ contains
     endif
     !***********************************************************************!
 
-    !***********************************************************************!
-    ! print hydronium neighborhood for autoencoder project
-
-    ! print *, "BEGIN hydronium positions; step:", trajectory_step
-
-    ! h3o_index = hydronium_molecule_index(1)
-
-    ! do j_index = 1,4
-    !     j_atom = molecule_data(h3o_index)%atom_index(j_index)
-    !     x = atom_data%xyz(1,j_atom)
-    !     y = atom_data%xyz(2,j_atom)
-    !     z = atom_data%xyz(3,j_atom)
-    !     atype_index = atom_data%atom_type_index(j_atom)
-    !     write(*, '(A, I, F10.4, F10.4, F10.4)'), atype_name(atype_index), j_atom, x,y,z
-    ! end do
-
-    ! print *, "END hydronium positions"
-
-    ! oxygen_index = molecule_data(h3o_index)%atom_index(1)
-    ! verlet_start = verlet_list_data%verlet_point(oxygen_index)
-    ! verlet_finish = verlet_list_data%verlet_point(oxygen_index + 1) - 1
-    ! n_neighbors = verlet_finish - verlet_start + 1
-
-    ! write (*, '(A, I4, A, I)'), "BEGIN hydronium neighborhood (", n_neighbors, " atoms); step:", trajectory_step
-
-    ! ! find all neighbor indices of the oxygen atom
-    ! do j_index=verlet_start, verlet_finish
-    !     j_atom = verlet_list_data%neighbor_list(j_index)
-    !     x = atom_data%xyz(1,j_atom)
-    !     y = atom_data%xyz(2,j_atom)
-    !     z = atom_data%xyz(3,j_atom)
-    !     atype_index = atom_data%atom_type_index(j_atom)
-    !     write(*, '(A, I, F10.4, F10.4, F10.4)'), atype_name(atype_index), j_atom, x,y,z
-    ! end do
-
-    ! print *, "END hydronium neighborhood"
-
-
-    !***********************************************************************!
-
-
     ! define local variables for convenience
     dt = integrator_data%delta_t
     conv_fac = constants%conv_kJmol_ang2ps2gmol  ! converts kJ/mol to A^2/ps^2*g/mol
     total_atoms = system_data%total_atoms
 
-    !h3o_ind = hydronium_molecule_index(1)
-    !atom_num = molecule_data(h3o_ind)%atom_index
+    h3o_index = hydronium_molecule_index(1)
+    !atom_num = molecule_data(h3o_index)%atom_index
 
     !if ( mod( trajectory_step, integrator_data%n_output ) == 0 ) then
     !do i=atom_num(1), atom_num(4)
@@ -558,6 +532,15 @@ contains
     End Select
     !********************************************************************************!
 
+    ! print hydronium neighborhood if the proton jumped
+    if (h3o_index /= hydronium_molecule_index(1)) then
+        write (*,*) "BEGIN neighborhood positions BEFORE JUMP"
+        call print_neighborhood_data(h3o_neighborhood, n_neighbors)
+        write(*,*), "BEGIN neighborhood positions AFTER JUMP"
+        call save_hydronium_neighborhood( system_data , molecule_data , atom_data, verlet_list_data, file_io_data, h3o_neighborhood, n_neighbors )
+        call print_neighborhood_data(h3o_neighborhood, n_neighbors)
+        write(*,*) "END neighborhood positions"
+    end if
 
      ! now final velocities
     do i_atom = 1, total_atoms
@@ -596,8 +579,78 @@ contains
 
   end subroutine md_integrate_atomic
 
+  subroutine save_hydronium_neighborhood( system_data , molecule_data , atom_data, verlet_list_data, file_io_data, neighborhood_data, n_neighbors )
+    use global_variables
+    type( system_data_type ), intent(in)     :: system_data
+    type( molecule_data_type ), dimension(:), intent(in)   :: molecule_data
+    type( atom_data_type ) , intent(in)      :: atom_data
+    type(verlet_list_data_type), intent(in)  :: verlet_list_data
+    type(file_io_data_type) , intent(in)     :: file_io_data
+    type( atom_data_type ) , intent(in)      :: neighborhood_data
+    integer, intent (out) :: n_neighbors
 
+    integer :: i_atom, i_type, total_atoms, h3o_index, i, j, pos_index
+    integer :: oxygen_index, verlet_start, verlet_finish
+    ! this will be used to store the previous frame's atomic_positions
+    ! which will be printed when a proton hops
 
+    h3o_index = hydronium_molecule_index(1)
 
+    pos_index = 5
+    do i = 1,4
+        neighborhood_data%xyz(:,i)             = atom_data%xyz(:,h3o_index)
+        neighborhood_data%velocity(:,i)        = atom_data%velocity(:,h3o_index)
+        neighborhood_data%force(:,i)           = atom_data%force(:,h3o_index)
+        neighborhood_data%atom_type_index(i) = atom_data%atom_type_index(h3o_index)
+    end do
+
+    oxygen_index = molecule_data(h3o_index)%atom_index(1)
+    verlet_start = verlet_list_data%verlet_point(oxygen_index)
+    verlet_finish = verlet_list_data%verlet_point(oxygen_index + 1) - 1
+    n_neighbors = verlet_finish - verlet_start + 1
+
+    ! find all neighbor indices of the oxygen atom
+    do i=verlet_start, verlet_finish
+        i_atom = verlet_list_data%neighbor_list(i)
+        neighborhood_data%xyz(:,pos_index)           = atom_data%xyz(:,i_atom)
+        neighborhood_data%velocity(:,pos_index)      = atom_data%velocity(:,i_atom)
+        neighborhood_data%force(:,pos_index)         = atom_data%force(:,i_atom)
+        neighborhood_data%atom_type_index(pos_index) = atom_data%atom_type_index(i_atom)
+        neighborhood_data%mass(pos_index)            = i_atom
+        pos_index = pos_index + 1
+    end do
+
+    end subroutine save_hydronium_neighborhood
+
+    subroutine allocate_atom_data( atom_data, n_atoms )
+        use global_variables
+        type(atom_data_type), intent(inout) :: atom_data
+        integer, intent(in) :: n_atoms
+
+        allocate( atom_data%xyz(3,n_atoms) )
+        allocate( atom_data%velocity(3,n_atoms) )
+        allocate( atom_data%force(3,n_atoms) )
+        allocate( atom_data%atom_type_index(n_atoms) )
+        allocate( atom_data%mass(n_atoms) ) ! this will be used for storing real atom index
+    end subroutine allocate_atom_data
+
+    subroutine print_neighborhood_data(neighborhood_data, n_neighbors) 
+        use global_variables
+        type(atom_data_type), intent(in) :: neighborhood_data
+        integer, intent(in) :: n_neighbors
+
+        integer :: i, i_type, i_atom
+
+        write(*,*), "BEGIN hydronium position; step:", trajectory_step
+        do i=1,n_neighbors + 4
+            if (i == 5) then
+                write (*, '(A, I6, A, I)'), "BEGIN hydronium neighborhood (", n_neighbors, " atoms); step:", trajectory_step
+            end if
+
+            i_atom = neighborhood_data%mass(i)
+            i_type = neighborhood_data%atom_type_index(i)
+            write(*, '(A, I, F10.4, F10.4, F10.4)'), atype_name(i_type), i_atom, neighborhood_data%xyz(:,i)
+        end do
+    end subroutine print_neighborhood_data
 
 end module md_integration
