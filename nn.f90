@@ -3,36 +3,48 @@ program nn
 
     real,allocatable :: weights(:,:,:)
     real,allocatable :: bias(:,:), zs(:,:), as(:,:), errors(:,:)
-    real,dimension(3) :: example
-    integer :: i, n_layers
+    real,allocatable :: examples(:,:), output(:,:)
+    integer :: i, j, k, n_layers, n_examples
 
-    n_layers = 10
+    n_layers = 2
+    n_examples = 10000000
     allocate(weights(n_layers,3,3), bias(n_layers,3), zs(n_layers,3), as(n_layers,3), errors(n_layers,3))
+    allocate(examples(n_examples,3), output(n_examples,3))
 
-    do i = 1,n_layers
-        bias(i,:) = (/ 1, 2, 3 /)
-    end do
-
-    call random_number(as(1,:))
-    ! call random_number(bias)
+    ! call random_number(examples)
+    call random_number(bias)
     call random_number(weights)
 
-    do i = 1,n_layers
-        call feedforward(as(i,:), weights(i,:,:), bias(i,:), zs(i,:))
-    end do
+    output(:,:) = exp(examples(:,:))
 
+    do j = 1,n_examples
+        do i = 1,3
+            ! print*, weights(:,i,:)
+        end do
 
-    example = (/ 40, 50, 60 /)
-    call output_error(example, as(n_layers,:), zs(n_layers,:), errors(1,:))
+        as(1,:) = examples(j,:)
+        do i = 1,n_layers
+            call feedforward(weights(i,:,:), bias(i,:), as(i,:), zs(i,:))
+        end do
 
-    do i = 1,n_layers - 1
-        errors(i + 1,:) = errors(i,:)
-        call backpropagate(errors(i+1,:), weights(n_layers - i,:,:), zs(n_layers - i,:))
-    end do
+        ! print*, as(n_layers,:)
+        ! print*, output(j,:)
+        ! print*, as(n_layers,:) - output(j,:)
+        if (mod(j, 10000) .EQ. 0) then
+            print*, sum((as(n_layers,:) - output(j,:))**2)**(0.5)
+        end if
 
-    do i = 1,n_layers
-        call update_weights(weights(i,:,:), errors(i,:), as(i-1,:), 0.01)
-        call update_bias(bias(i,:), errors(i,:), 0.01)
+        call output_error(output(j,:), as(n_layers,:), zs(n_layers,:), errors(n_layers,:))
+
+        do i = 1,n_layers - 2
+            errors(n_layers - i,:) = errors(n_layers - i + 1,:)
+            call backpropagate(errors(n_layers - i,:), weights(n_layers - i + 1,:,:), zs(n_layers - i,:))
+        end do
+
+        do i = 2,n_layers
+            call update_weights(weights(i,:,:), errors(i,:), as(i-1,:), 1.)
+            call update_bias(bias(i,:), errors(i,:), 1.)
+        end do
     end do
 
 contains
@@ -41,18 +53,27 @@ contains
     subroutine update_weights(weights, error, activation, mu)
         real,intent(inout) :: weights(:,:)
         real,intent(in) :: error(:), activation(:), mu
+        real :: dw(3,3)
+        integer :: i, j, n
 
-        weights = weights - mu * dot_product(error, activation)
+        n = size(error)
+        do i=1,n
+            do j=1,n
+                dw(i,j) = activation(j)*error(i)
+            end do
+        end do
+        ! print*, dw * mu
+        weights = weights - mu * dw
     end subroutine update_weights
 
     subroutine update_bias(bias, error, mu)
         real,intent(inout) :: bias(:)
         real,intent(in) :: error(:), mu
         
-        bias = bias - mu * sum(error)
+        bias = bias - mu * error
     end subroutine update_bias
 
-    subroutine feedforward(a, weights, bias, z)
+    subroutine feedforward(weights, bias, a, z)
         real,intent(in) :: weights(:,:), bias(:)
         real,dimension(:),intent(inout) :: a, z
         integer :: i
@@ -75,7 +96,7 @@ contains
         real,dimension(:),intent(inout) :: error
         real,intent(in) :: weights(:,:), zs(:)
 
-        error = matmul(transpose(weights), error)
+        error = matmul(weights, error)
         error = (/ (error(i) * sigmoid1(zs(i)), i=1, size(error)) /)
     end subroutine backpropagate
 
