@@ -2,13 +2,14 @@ program nn
     implicit none
 
     real,allocatable :: weights(:,:,:)
-    real,allocatable :: bias(:,:), zs(:,:), as(:,:), errors(:,:)
+    real,allocatable :: bias(:,:), zs(:,:), as(:,:), errors(:,:), grad(:,:), tmp(:,:)
     real,allocatable :: examples(:,:), output(:,:)
-    integer :: i, j, k, n_layers, n_examples
+    integer :: i, j, k, l, n_layers, n_examples
 
-    n_layers = 2
-    n_examples = 10000000
+    n_layers = 20
+    n_examples = 10
     allocate(weights(n_layers,3,3), bias(n_layers,3), zs(n_layers,3), as(n_layers,3), errors(n_layers,3))
+    allocate(grad(3,3))
     allocate(examples(n_examples,3), output(n_examples,3))
 
     ! call random_number(examples)
@@ -27,10 +28,11 @@ program nn
             call feedforward(weights(i,:,:), bias(i,:), as(i,:), zs(i,:))
         end do
 
-        ! print*, as(n_layers,:)
-        ! print*, output(j,:)
-        ! print*, as(n_layers,:) - output(j,:)
-        if (mod(j, 10000) .EQ. 0) then
+        grad(:,:) = 0
+        call gradient(grad, weights, zs)
+        print*, grad
+
+        if (mod(j, 1) .EQ. 0) then
             print*, sum((as(n_layers,:) - output(j,:))**2)**(0.5)
         end if
 
@@ -49,6 +51,27 @@ program nn
 
 contains
 
+    subroutine gradient(grad, weights, zs)
+        real,intent(inout) :: grad(:,:)
+        real,intent(in) :: weights(:,:,:), zs(:,:)
+        real,allocatable :: tmp(:,:)
+        integer :: n
+
+        n = size(grad(1,:))
+        allocate(tmp(n,n))
+
+        forall (j=1:n) tmp(j,j) = sigmoid1(zs(1,j))
+        do i=1,n
+            grad(:,i) = matmul(tmp, weights(1,:,i))
+        end do
+        do l=2,n_layers
+            ! all of the sigmoid matrices are diagonal, so they commute with the other matrices
+            ! so they can be placed anywhere in the computation
+            forall(j=1:n) grad(j,j) = grad(j,j) * sigmoid1(zs(l,j))
+            grad(:,:) = matmul(grad(:,:), weights(l,:,:))
+        end do
+    end subroutine gradient
+
     ! activation of previous layer
     subroutine update_weights(weights, error, activation, mu)
         real,intent(inout) :: weights(:,:)
@@ -62,7 +85,6 @@ contains
                 dw(i,j) = activation(j)*error(i)
             end do
         end do
-        ! print*, dw * mu
         weights = weights - mu * dw
     end subroutine update_weights
 
