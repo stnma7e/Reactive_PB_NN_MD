@@ -1,50 +1,31 @@
 program nn
     implicit none
 
-    real,allocatable :: weights(:,:,:)
-    real,allocatable :: bias(:,:), zs(:,:), as(:,:), errors(:,:), grad(:,:), tmp(:,:)
-    real,allocatable :: examples(:,:), output(:,:)
-    integer :: i, j, k, l, n_layers, n_examples
-    real :: e_output, mu
+    real,allocatable :: weights(:,:,:), bias(:,:)
+    real,allocatable :: as(:,:), zs(:,:), grad(:,:)
+    real,allocatable :: examples(:,:)
+    integer :: i, j, n_layers, n_examples
 
-    n_layers = 20
+    n_layers = 2
     n_examples = 100000000
-    allocate(weights(n_layers,3,3), bias(n_layers,3), zs(n_layers,3), as(n_layers,3), errors(n_layers,3))
+    allocate(weights(n_layers,3,3), bias(n_layers,3))
+    allocate(as(n_layers,3), zs(n_layers,3))
+    allocate(examples(n_examples,3))
     allocate(grad(3,3))
-    allocate(examples(n_examples,3), output(n_examples,3))
 
-    ! call random_number(examples)
+    call random_number(examples)
     call random_number(bias)
     call random_number(weights)
 
-    mu = 1.0
-    output(:,:) = exp(examples(:,:))
-
     do j = 1,n_examples
-        as(1,:) = examples(j,:)
-        do i = 1,n_layers
-            call feedforward(weights(i,:,:), bias(i,:), as(i,:), zs(i,:))
-        end do
-
-        grad(:,:) = 0
-        call gradient(grad, weights, zs)
-        ! print*, grad
-
-        e_output = sum((as(n_layers,:) - output(j,:))**2)**(0.5)
-        if (mod(j, 10000) .EQ. 0) then
-            print*, e_output
-        end if
-
-        call output_error(output(j,:), as(n_layers,:), zs(n_layers,:), errors(n_layers,:))
-        do i = 1,n_layers - 2
-            errors(n_layers - i,:) = errors(n_layers - i + 1,:)
-            call backpropagate(errors(n_layers - i,:), weights(n_layers - i + 1,:,:), zs(n_layers - i,:))
-        end do
-
+        call feedforward(weights(1,:,:), bias(1,:), examples(j,:), as(1,:), zs(1,:))
         do i = 2,n_layers
-            call update_weights(weights(i,:,:), errors(i,:), as(i-1,:), mu)
-            call update_bias(bias(i,:), errors(i,:), mu)
+            call feedforward(weights(i,:,:), bias(i,:), as(i-1,:), as(i,:), zs(i,:))
         end do
+
+        grad = 0
+        call gradient(grad, weights, zs)
+        print*, grad
     end do
 
 contains
@@ -53,7 +34,7 @@ contains
         real,intent(inout) :: grad(:,:)
         real,intent(in) :: weights(:,:,:), zs(:,:)
         real,allocatable :: tmp(:,:)
-        integer :: n
+        integer :: i, j, n, l
 
         n = size(grad(1,:))
         allocate(tmp(n,n))
@@ -70,30 +51,15 @@ contains
         end do
     end subroutine gradient
 
-    ! activation of previous layer
-    subroutine update_weights(weights, error, activation, mu)
-        real,intent(inout) :: weights(:,:)
-        real,intent(in) :: error(:), activation(:), mu
-        integer :: i, j, n
-
-        n = size(error)
-        forall (i=1:n,j=1:n) weights(i,j) = weights(i,j) - mu * activation(j)*error(i)
-    end subroutine update_weights
-
-    subroutine update_bias(bias, error, mu)
-        real,intent(inout) :: bias(:)
-        real,intent(in) :: error(:), mu
-        
-        bias = bias - mu * error
-    end subroutine update_bias
-
-    subroutine feedforward(weights, bias, a, z)
-        real,intent(in) :: weights(:,:), bias(:)
-        real,dimension(:),intent(inout) :: a, z
+    subroutine feedforward(weights, bias, input, output, z)
+        real,intent(in)    :: weights(:,:), bias(:)
+        real,intent(in)    :: input(:)
+        real,intent(out)   :: output(:)
+        real,intent(inout) :: z(:)
         integer :: i
 
-        z = matmul(a, weights) + bias
-        a = (/ (sigmoid(z(i)), i=1, size(a)) /)
+        z = matmul(input, weights) + bias
+        output = (/ (sigmoid(z(i)), i=1, size(output)) /)
     end subroutine feedforward
 
     ! computes the "error" in the output layer
@@ -105,14 +71,6 @@ contains
         error = (/ (output(i) - example(i), i=1, size(error)) /)
         error = (/ (error(i) * sigmoid1(zs(i)), i=1, size(error)) /)
     end subroutine output_error
-
-    subroutine backpropagate(error, weights, zs)
-        real,dimension(:),intent(inout) :: error
-        real,intent(in) :: weights(:,:), zs(:)
-
-        error = matmul(weights, error)
-        error = (/ (error(i) * sigmoid1(zs(i)), i=1, size(error)) /)
-    end subroutine backpropagate
 
     pure function sigmoid(z) result(r)
         real,intent(in) :: z
