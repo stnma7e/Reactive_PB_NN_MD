@@ -5,9 +5,10 @@ program nn
     real,allocatable :: bias(:,:), zs(:,:), as(:,:), errors(:,:), grad(:,:), tmp(:,:)
     real,allocatable :: examples(:,:), output(:,:)
     integer :: i, j, k, l, n_layers, n_examples
+    real :: e_output, mu
 
     n_layers = 20
-    n_examples = 10
+    n_examples = 100000000
     allocate(weights(n_layers,3,3), bias(n_layers,3), zs(n_layers,3), as(n_layers,3), errors(n_layers,3))
     allocate(grad(3,3))
     allocate(examples(n_examples,3), output(n_examples,3))
@@ -16,13 +17,10 @@ program nn
     call random_number(bias)
     call random_number(weights)
 
+    mu = 1.0
     output(:,:) = exp(examples(:,:))
 
     do j = 1,n_examples
-        do i = 1,3
-            ! print*, weights(:,i,:)
-        end do
-
         as(1,:) = examples(j,:)
         do i = 1,n_layers
             call feedforward(weights(i,:,:), bias(i,:), as(i,:), zs(i,:))
@@ -30,22 +28,22 @@ program nn
 
         grad(:,:) = 0
         call gradient(grad, weights, zs)
-        print*, grad
+        ! print*, grad
 
-        if (mod(j, 1) .EQ. 0) then
-            print*, sum((as(n_layers,:) - output(j,:))**2)**(0.5)
+        e_output = sum((as(n_layers,:) - output(j,:))**2)**(0.5)
+        if (mod(j, 10000) .EQ. 0) then
+            print*, e_output
         end if
 
         call output_error(output(j,:), as(n_layers,:), zs(n_layers,:), errors(n_layers,:))
-
         do i = 1,n_layers - 2
             errors(n_layers - i,:) = errors(n_layers - i + 1,:)
             call backpropagate(errors(n_layers - i,:), weights(n_layers - i + 1,:,:), zs(n_layers - i,:))
         end do
 
         do i = 2,n_layers
-            call update_weights(weights(i,:,:), errors(i,:), as(i-1,:), 1.)
-            call update_bias(bias(i,:), errors(i,:), 1.)
+            call update_weights(weights(i,:,:), errors(i,:), as(i-1,:), mu)
+            call update_bias(bias(i,:), errors(i,:), mu)
         end do
     end do
 
@@ -76,16 +74,10 @@ contains
     subroutine update_weights(weights, error, activation, mu)
         real,intent(inout) :: weights(:,:)
         real,intent(in) :: error(:), activation(:), mu
-        real :: dw(3,3)
         integer :: i, j, n
 
         n = size(error)
-        do i=1,n
-            do j=1,n
-                dw(i,j) = activation(j)*error(i)
-            end do
-        end do
-        weights = weights - mu * dw
+        forall (i=1:n,j=1:n) weights(i,j) = weights(i,j) - mu * activation(j)*error(i)
     end subroutine update_weights
 
     subroutine update_bias(bias, error, mu)
